@@ -1,9 +1,10 @@
 import React, { useContext, useEffect, useState } from 'react';
 import { AuthContext } from '../context/AuthContext';
 import { useNavigate, Link } from 'react-router-dom';
-import axios from 'axios';
 import { FiDownload, FiBox, FiClock, FiCheckCircle, FiAlertCircle } from 'react-icons/fi';
 import { motion } from 'framer-motion';
+import { db } from '../config/firebase';
+import { doc, getDoc, collection, getDocs, query, where } from 'firebase/firestore';
 
 const fadeIn = {
   hidden: { opacity: 0, y: 20 },
@@ -25,15 +26,51 @@ const Dashboard = () => {
 
     const fetchData = async () => {
       try {
-        const config = { headers: { Authorization: `Bearer ${user.token}` } };
+        // 1. Fetch latest user details (to get purchasedProjects array)
+        const userDocRef = doc(db, 'users', user.uid);
+        const userDoc = await getDoc(userDocRef);
         
-        const profileRes = await axios.get('/api/auth/profile', config);
-        setPurchasedProjects(profileRes.data.purchasedProjects || []);
+        let purchasedIds = [];
+        if (userDoc.exists()) {
+          purchasedIds = userDoc.data().purchasedProjects || [];
+        }
+
+        // 2. Fetch full project details for each purchased id
+        const purchasedList = [];
+        for (const pid of purchasedIds) {
+          try {
+            const projDoc = await getDoc(doc(db, 'projects', pid));
+            if (projDoc.exists()) {
+              purchasedList.push({
+                _id: projDoc.id,
+                id: projDoc.id,
+                ...projDoc.data()
+              });
+            }
+          } catch (err) {
+            console.error(`Error loading purchased project ${pid}:`, err);
+          }
+        }
+        setPurchasedProjects(purchasedList);
+
+        // 3. Fetch custom requirements submitted by this user
+        const reqsCol = collection(db, 'requirements');
+        const q = query(reqsCol, where('userId', '==', user.uid));
+        const querySnapshot = await getDocs(q);
         
-        const reqsRes = await axios.get('/api/requirements/myrequirements', config);
-        setCustomRequirements(reqsRes.data || []);
+        const reqsList = [];
+        querySnapshot.forEach((docSnap) => {
+          reqsList.push({
+            _id: docSnap.id,
+            id: docSnap.id,
+            ...docSnap.data()
+          });
+        });
+        // Sort requirements by createdAt desc
+        reqsList.sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
+        setCustomRequirements(reqsList);
       } catch (error) {
-        console.error(error);
+        console.error('Error fetching dashboard data:', error);
       } finally {
         setLoading(false);
       }

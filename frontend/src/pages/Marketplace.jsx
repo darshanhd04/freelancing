@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import axios from 'axios';
 import { motion } from 'framer-motion';
 import { Link } from 'react-router-dom';
 import { AuthContext } from '../context/AuthContext';
 import { FiSearch, FiCode, FiSend, FiArrowRight } from 'react-icons/fi';
+import { db } from '../config/firebase';
+import { collection, getDocs, addDoc } from 'firebase/firestore';
 
 const fadeIn = {
   hidden: { opacity: 0, y: 20 },
@@ -31,25 +32,27 @@ const Marketplace = () => {
     }
     setIsSubmitting(true);
     try {
-      const config = {
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${user.token}`,
+      await addDoc(collection(db, 'requirements'), {
+        userId: user.uid,
+        user: {
+          id: user.uid,
+          name: user.name,
+          email: user.email
         },
-      };
-      await axios.post('/api/requirements', { 
-        title: reqTitle, 
-        description: reqDescription, 
-        category: reqCategory, 
-        budget: reqBudget 
-      }, config);
+        title: reqTitle,
+        description: reqDescription,
+        category: reqCategory,
+        budget: Number(reqBudget),
+        status: 'Pending',
+        createdAt: new Date().toISOString()
+      });
       
       setReqMessage({ type: 'success', text: 'Requirement submitted successfully. The architect will review it shortly.' });
       setReqTitle('');
       setReqDescription('');
       setReqBudget('');
     } catch (error) {
-      setReqMessage({ type: 'error', text: error.response?.data?.message || 'Failed to submit requirement' });
+      setReqMessage({ type: 'error', text: error.message || 'Failed to submit requirement' });
     } finally {
       setIsSubmitting(false);
     }
@@ -58,10 +61,25 @@ const Marketplace = () => {
   useEffect(() => {
     const fetchProjects = async () => {
       try {
-        const { data } = await axios.get(`/api/projects${categoryFilter ? `?category=${categoryFilter}` : ''}`);
-        setProjects(data);
+        const querySnapshot = await getDocs(collection(db, 'projects'));
+        let projectsList = [];
+        querySnapshot.forEach((doc) => {
+          projectsList.push({
+            _id: doc.id,
+            id: doc.id,
+            ...doc.data()
+          });
+        });
+        
+        // Dynamic client-side filtering and sorting
+        if (categoryFilter) {
+          projectsList = projectsList.filter(p => p.category === categoryFilter);
+        }
+        projectsList.sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
+        
+        setProjects(projectsList);
       } catch (error) {
-        console.error(error);
+        console.error('Error fetching projects from Firestore:', error);
       } finally {
         setLoading(false);
       }

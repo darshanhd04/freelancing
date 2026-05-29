@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useContext } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import axios from 'axios';
 import { AuthContext } from '../context/AuthContext';
 import { FiCheckCircle, FiShield, FiCode, FiPlayCircle, FiDownload, FiArrowLeft } from 'react-icons/fi';
 import toast from 'react-hot-toast';
 import { motion } from 'framer-motion';
+import { db } from '../config/firebase';
+import { doc, getDoc, updateDoc, arrayUnion, collection, addDoc } from 'firebase/firestore';
 
 const fadeIn = {
   hidden: { opacity: 0, y: 20 },
@@ -21,8 +22,17 @@ const ProjectDetail = () => {
   useEffect(() => {
     const fetchProject = async () => {
       try {
-        const { data } = await axios.get(`/api/projects/${id}`);
-        setProject(data);
+        const docRef = doc(db, 'projects', id);
+        const docSnap = await getDoc(docRef);
+        if (docSnap.exists()) {
+          setProject({
+            _id: docSnap.id,
+            id: docSnap.id,
+            ...docSnap.data()
+          });
+        } else {
+          toast.error('Project not found.');
+        }
       } catch (error) {
         toast.error('Failed to load project architecture.');
       } finally {
@@ -47,13 +57,28 @@ const ProjectDetail = () => {
     }
 
     try {
-      const config = { headers: { Authorization: `Bearer ${user.token}` } };
-      await axios.post('/api/orders/create', { projectId: id }, config);
+      // 1. Add order to 'orders' collection
+      await addDoc(collection(db, 'orders'), {
+        userId: user.uid,
+        projectId: id,
+        status: 'Completed',
+        createdAt: new Date().toISOString()
+      });
+
+      // 2. Update user document in 'users'
+      const userRef = doc(db, 'users', user.uid);
+      await updateDoc(userRef, {
+        purchasedProjects: arrayUnion(id)
+      });
+
+      // Update local storage and user object in-place so Dashboard loads it instantly
+      user.purchasedProjects.push(id);
+      localStorage.setItem('userInfo', JSON.stringify(user));
 
       toast.success('Architecture requested successfully! Access unlocked.');
       navigate('/dashboard');
     } catch (error) {
-      toast.error(error.response?.data?.message || 'Error processing request.');
+      toast.error(error.message || 'Error processing request.');
     }
   };
 
